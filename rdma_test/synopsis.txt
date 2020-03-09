@@ -1,0 +1,30 @@
+Parse command line. The user may set the TCP port, device name, and device port for the test. If
+set, these values will override default values in config. The last parameter is the server name. If
+the server name is set, this designates a server to connect to and therefore puts the program into
+client mode. Otherwise the program is in server mode.
+Call print_config.
+Call resources_init.
+Call resources_create.
+Call connect_qp.
+If in server mode, do a call post_send with IBV_WR_SEND operation.
+Call poll_completion. Note that the server side expects a completion from the SEND request and
+the client side expects a RECEIVE completion.
+If in client mode, show the message we received via the RECEIVE operation, otherwise, if we
+are in server mode, load the buffer with a new message.
+ Sync client<->server.
+At this point the server goes directly to the next sync. All RDMA operations are done strictly by
+the client.
+***Client only ***
+Call post_send with IBV_WR_RDMA_READ to perform a RDMA read of server’s buffer.
+Call poll_completion.
+Show server’s message.
+Setup send buffer with new message.
+Call post_send with IBV_WR_RDMA_WRITE to perform a RDMA write of server’s buffer.
+Call poll_completion.
+*** End client only operations ***
+Sync client<->server.
+If server mode, show buffer, proving RDMA write worked.
+Call resources_destroy.
+Free device name string.
+Done
+
