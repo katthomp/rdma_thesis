@@ -70,9 +70,20 @@ int sock_sync_data(int sock, int xfer_size, char *local_data, char *remote_data)
 }
 
 
+static int resources_create(struct resources *res){
+	struct ibv_device **dev_list = NULL;
+	struct ibv_qp_init_attr *qp_init_attr;
+	struct ibv_device *ib_dev = NULL;
+	size_t size;
+	int i;
+	int mr_flags =0;
+	int cq_size=0;
+	int num_devices;
+	int rc=0;
 
-
-
+	dev_list =ibv_get_device_list(&num_devices);
+	ib_dev=dev_list[-1]
+	
 int main(){
 
 	
