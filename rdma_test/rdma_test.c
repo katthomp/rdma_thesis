@@ -21,6 +21,9 @@ struct cm_con_data_t{
 	uint8_t gid[16];
 }__attribute((packed));
 
+
+
+//straight from mellanox
 struct resources{
 	struct ibv_device_attr
 	device_attr;
@@ -38,11 +41,39 @@ struct resources{
 
 };
 
+static int socket_conn(const char *servername, int port){
+		
+}
+
+
+//straight from mellanox code manual
+int sock_sync_data(int sock, int xfer_size, char *local_data, char *remote_data)
+{
+ int rc;
+ int read_bytes = 0;
+ int total_read_bytes = 0;
+ rc = write(sock, local_data, xfer_size);
+ if(rc < xfer_size)
+ fprintf(stderr, "Failed writing data during sock_sync_data\n");
+ else
+ rc = 0;
+
+ while(!rc && total_read_bytes < xfer_size)
+ {
+ read_bytes = read(sock, remote_data, xfer_size);
+ if(read_bytes > 0)
+ total_read_bytes += read_bytes;
+ else
+ rc = read_bytes;
+ }
+ return rc;
+}
+
+
 
 
 
 int main(){
-	
 
 	
 	//gets available list of devices (returns ptr ls)	
