@@ -3,7 +3,7 @@
 
 //unsure what inputs this takes right now
 //TODO
-static int close_everything(){
+static int close_sock(){
 	 if (listenfd)
         close (listenfd);
     if (resolved_addr)
@@ -21,9 +21,60 @@ static int close_everything(){
 
 }
 
+static int close_resources(struct resources *res, int rc){
+	if (rc) {
+        /* Error encountered, cleanup */
+        if (res->qp)
+        {
+            ibv_destroy_qp (res->qp);
+            res->qp = NULL;
+        }
+        if (res->mr)
+        {
+            ibv_dereg_mr (res->mr);
+            res->mr = NULL;
+        }
+        if (res->buf)
+        {
+            free (res->buf);
+            res->buf = NULL;
+        }
+        if (res->cq)
+        {
+            ibv_destroy_cq (res->cq);
+            res->cq = NULL;
+        }
+        if (res->pd)
+        {
+            ibv_dealloc_pd (res->pd);
+            res->pd = NULL;
+        }
+        if (res->ib_ctx)
+        {
+            ibv_close_device (res->ib_ctx);
+            res->ib_ctx = NULL;
+        }
+        if (dev_list)
+        {
+            ibv_free_device_list (dev_list);
+            dev_list = NULL;
+        }
+        if (res->sock >= 0)
+        {
+            if (close (res->sock))
+                fprintf (stderr, "failed to close socket\n");
+            res->sock = -1;
+        }
+    }
+
+}
+
+
+
+
 
 static int sock_conn(const char *servername, int port){
-	struct addrinfo *resolved_addr = NULL;
+	 struct addrinfo *resolved_addr = NULL;
    	 struct addrinfo *iterator;
    	 char service[6];
    	 int sockfd = -1;
@@ -44,3 +95,97 @@ static int sock_conn(const char *servername, int port){
 	}
 
 }
+
+static int resources_create(struct resources *res){
+	 struct ibv_device **dev_list = NULL;
+   	 struct ibv_qp_init_attr qp_init_attr;
+   	 struct ibv_device *ib_dev = NULL;
+   	 size_t size;
+   	 int i;
+   	 int mr_flags = 0;
+   	 int cq_size = 0;
+   	 int num_devices;
+   	 int rc = 0;
+	//compare ib_dev to mlnx5_0, if so, continue, else fault
+	/* get device handle */
+   	 res->ib_ctx = ibv_open_device (ib_dev);
+   	 if (!res->ib_ctx)
+   	 {
+       		fprintf (stderr, "failed to open device %s\n", config.dev_name);
+        	rc = 1;
+ 		close_resources(res, rc)       	
+   	 }
+	 if (ibv_query_port (res->ib_ctx, config.ib_port, &res->port_attr))
+	{
+        	fprintf (stderr, "ibv_query_port on port %u failed\n", config.ib_port);
+        	rc = 1;
+        	goto resources_create_exit;
+    	}
+   	 /* allocate Protection Domain */
+   	 res->pd = ibv_alloc_pd (res->ib_ctx);
+   	 if (!res->pd)
+   	{
+       		fprintf (stderr, "ibv_alloc_pd failed\n");
+        	rc = 1;
+        	goto resources_create_exit;
+    	}
+   	 /* each side will send only one WR, so Completion Queue with 1 entry is enough */
+   	 cq_size = 1;
+   	 res->cq = ibv_create_cq (res->ib_ctx, cq_size, NULL, NULL, 0);
+   	 if (!res->cq)
+   	 {
+       		 fprintf (stderr, "failed to create CQ with %u entries\n", cq_size);
+       		 rc = 1;
+       		 goto resources_create_exit;
+   	 }
+   	 /* allocate the memory buffer that will hold the data */
+   	 size = MSG_SIZE;
+   	 res->buf = (char *) malloc (size);
+   	 if (!res->buf)
+   	 {
+       		 fprintf (stderr, "failed to malloc %Zu bytes to memory buffer\n", size);
+        	 rc = 1;
+       		 goto resources_create_exit;
+   	 }
+   	 memset (res->buf, 0, size);
+	 mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+        IBV_ACCESS_REMOTE_WRITE;
+    res->mr = ibv_reg_mr (res->pd, res->buf, size, mr_flags);
+    if (!res->mr)
+    {
+        fprintf (stderr, "ibv_reg_mr failed with mr_flags=0x%x\n", mr_flags);
+        rc = 1;
+        goto resources_create_exit;
+    }
+    fprintf (stdout,
+            "MR was registered with addr=%p, lkey=0x%x, rkey=0x%x, flags=0x%x\n",
+            res->buf, res->mr->lkey, res->mr->rkey, mr_flags);
+    /* create the Queue Pair */
+    memset (&qp_init_attr, 0, sizeof (qp_init_attr));
+    qp_init_attr.qp_type = IBV_QPT_RC;
+    qp_init_attr.sq_sig_all = 1;
+    qp_init_attr.send_cq = res->cq;
+    qp_init_attr.recv_cq = res->cq;
+    qp_init_attr.cap.max_send_wr = 1;
+    qp_init_attr.cap.max_recv_wr = 1;
+    qp_init_attr.cap.max_send_sge = 1;
+    qp_init_attr.cap.max_recv_sge = 1;
+    res->qp = ibv_create_qp (res->pd, &qp_init_attr);
+    if (!res->qp)
+    {
+        fprintf (stderr, "failed to create QP\n");
+        rc = 1;
+        goto resources_create_exit;
+    }
+    fprintf (stdout, "QP was created, QP number=0x%x\n", res->qp->qp_num);
+}
+
+
+
+
+
+
+
+
+
+
