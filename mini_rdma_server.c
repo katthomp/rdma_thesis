@@ -10,23 +10,30 @@
 //step 7: transition qp (RESET->INIT->RTR->RTS)
 //step 8: actually use it
 //step 9: destroy objects in REVERSE order of creation
+#include "mini_rdma_cmn.h"
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
-#include <stdint.h>
-#include <inttypes.h>
-#include <endian.h>
-#include <byteswap.h>
-#include <getopt.h>
-#include <sys/time.h>
-#include <arpa/inet.h>
-#include <infiniband/verbs.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
 
-int main(){
+
+//may need to return res to make sure things worked
+int sock_conn_server(struct resources *res){
+	strcpy (res->buf, MSG);
+        fprintf (stdout, "going to send the message: '%s'\n", res->buf);
+}
+
+
+int resources_create_server(struct resources *res){
+	fprintf (stdout, "waiting on port %d for TCP connection\n",
+                config.tcp_port);
+        res->sock = sock_connect (NULL, config.tcp_port);
+        if (res->sock < 0)
+        {
+            fprintf (stderr,
+                    "failed to establish TCP connection with client on port %d\n",
+                    config.tcp_port);
+            rc = -1;
+            close_resources(res, rc); //link up with the def in mini_rdma_cmn.c
+        }
+
 
 }
+
