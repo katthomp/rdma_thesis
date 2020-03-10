@@ -106,6 +106,7 @@ static int resources_create(struct resources *res){
    	 int cq_size = 0;
    	 int num_devices;
    	 int rc = 0;
+	//TODO:
 	//compare ib_dev to mlnx5_0, if so, continue, else fault
 	/* get device handle */
    	 res->ib_ctx = ibv_open_device (ib_dev);
@@ -113,13 +114,13 @@ static int resources_create(struct resources *res){
    	 {
        		fprintf (stderr, "failed to open device %s\n", config.dev_name);
         	rc = 1;
- 		close_resources(res, rc)       	
+ 		close_resources(res, rc);       	
    	 }
 	 if (ibv_query_port (res->ib_ctx, config.ib_port, &res->port_attr))
 	{
         	fprintf (stderr, "ibv_query_port on port %u failed\n", config.ib_port);
         	rc = 1;
-        	goto resources_create_exit;
+        	close_resources(res, rc);
     	}
    	 /* allocate Protection Domain */
    	 res->pd = ibv_alloc_pd (res->ib_ctx);
@@ -127,7 +128,7 @@ static int resources_create(struct resources *res){
    	{
        		fprintf (stderr, "ibv_alloc_pd failed\n");
         	rc = 1;
-        	goto resources_create_exit;
+        	close_resources(res, rc);
     	}
    	 /* each side will send only one WR, so Completion Queue with 1 entry is enough */
    	 cq_size = 1;
@@ -136,7 +137,7 @@ static int resources_create(struct resources *res){
    	 {
        		 fprintf (stderr, "failed to create CQ with %u entries\n", cq_size);
        		 rc = 1;
-       		 goto resources_create_exit;
+       		 close_resources(res, rc);
    	 }
    	 /* allocate the memory buffer that will hold the data */
    	 size = MSG_SIZE;
@@ -145,46 +146,121 @@ static int resources_create(struct resources *res){
    	 {
        		 fprintf (stderr, "failed to malloc %Zu bytes to memory buffer\n", size);
         	 rc = 1;
-       		 goto resources_create_exit;
+       		 close_resources(res, rc);
    	 }
    	 memset (res->buf, 0, size);
 	 mr_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
-        IBV_ACCESS_REMOTE_WRITE;
-    res->mr = ibv_reg_mr (res->pd, res->buf, size, mr_flags);
-    if (!res->mr)
-    {
-        fprintf (stderr, "ibv_reg_mr failed with mr_flags=0x%x\n", mr_flags);
-        rc = 1;
-        goto resources_create_exit;
-    }
-    fprintf (stdout,
+       	 IBV_ACCESS_REMOTE_WRITE;
+    	res->mr = ibv_reg_mr (res->pd, res->buf, size, mr_flags);
+   	 if (!res->mr)
+   	 {
+        	fprintf (stderr, "ibv_reg_mr failed with mr_flags=0x%x\n", mr_flags);
+        	rc = 1;
+        	close_resources(res, rc);
+    	 }
+    	fprintf (stdout,
             "MR was registered with addr=%p, lkey=0x%x, rkey=0x%x, flags=0x%x\n",
             res->buf, res->mr->lkey, res->mr->rkey, mr_flags);
-    /* create the Queue Pair */
-    memset (&qp_init_attr, 0, sizeof (qp_init_attr));
-    qp_init_attr.qp_type = IBV_QPT_RC;
-    qp_init_attr.sq_sig_all = 1;
-    qp_init_attr.send_cq = res->cq;
-    qp_init_attr.recv_cq = res->cq;
-    qp_init_attr.cap.max_send_wr = 1;
-    qp_init_attr.cap.max_recv_wr = 1;
-    qp_init_attr.cap.max_send_sge = 1;
-    qp_init_attr.cap.max_recv_sge = 1;
-    res->qp = ibv_create_qp (res->pd, &qp_init_attr);
-    if (!res->qp)
-    {
-        fprintf (stderr, "failed to create QP\n");
-        rc = 1;
-        goto resources_create_exit;
-    }
-    fprintf (stdout, "QP was created, QP number=0x%x\n", res->qp->qp_num);
+    	/* create the Queue Pair */
+    	memset (&qp_init_attr, 0, sizeof (qp_init_attr));
+    	qp_init_attr.qp_type = IBV_QPT_RC;
+    	qp_init_attr.sq_sig_all = 1;
+    	qp_init_attr.send_cq = res->cq;
+    	qp_init_attr.recv_cq = res->cq;
+    	qp_init_attr.cap.max_send_wr = 1;
+    	qp_init_attr.cap.max_recv_wr = 1;
+    	qp_init_attr.cap.max_send_sge = 1;
+    	qp_init_attr.cap.max_recv_sge = 1;
+    	res->qp = ibv_create_qp (res->pd, &qp_init_attr);
+    	if (!res->qp)
+    	{
+        	fprintf (stderr, "failed to create QP\n");
+        	rc = 1;
+        	close_resources(res, rc);
+    	}
+    	fprintf (stdout, "QP was created, QP number=0x%x\n", res->qp->qp_num);
+	return rc;
 }
 
 
+static int
+modify_qp_to_init (struct ibv_qp *qp)
+{   
+    struct ibv_qp_attr attr;
+    int flags;
+    int rc;
+    memset (&attr, 0, sizeof (attr));
+    attr.qp_state = IBV_QPS_INIT;
+    attr.port_num = config.ib_port;
+    attr.pkey_index = 0; 
+    attr.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ |
+        IBV_ACCESS_REMOTE_WRITE;
+    flags =
+        IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
+    rc = ibv_modify_qp (qp, &attr, flags);
+    if (rc)
+        fprintf (stderr, "failed to modify QP state to INIT\n");
+    return rc;
+}
+
+static int
+modify_qp_to_rtr (struct ibv_qp *qp, uint32_t remote_qpn, uint16_t dlid,
+        uint8_t * dgid)
+{
+    struct ibv_qp_attr attr;
+    int flags;
+    int rc;
+    memset (&attr, 0, sizeof (attr));
+    attr.qp_state = IBV_QPS_RTR;
+    attr.path_mtu = IBV_MTU_256;
+    attr.dest_qp_num = remote_qpn;
+    attr.rq_psn = 0;
+    attr.max_dest_rd_atomic = 1;
+    attr.min_rnr_timer = 0x12;
+    attr.ah_attr.is_global = 0;
+    attr.ah_attr.dlid = dlid;
+    attr.ah_attr.sl = 0;
+    attr.ah_attr.src_path_bits = 0;
+    attr.ah_attr.port_num = config.ib_port;
+    if (config.gid_idx >= 0)
+    {
+        attr.ah_attr.is_global = 1;
+        attr.ah_attr.port_num = 1;
+        memcpy (&attr.ah_attr.grh.dgid, dgid, 16);
+        attr.ah_attr.grh.flow_label = 0;
+        attr.ah_attr.grh.hop_limit = 1;
+        attr.ah_attr.grh.sgid_index = config.gid_idx;
+        attr.ah_attr.grh.traffic_class = 0;
+    }
+    flags = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
+        IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
+    rc = ibv_modify_qp (qp, &attr, flags);
+    if (rc)
+        fprintf (stderr, "failed to modify QP state to RTR\n");
+    return rc;
+}
 
 
-
-
+static int
+modify_qp_to_rts (struct ibv_qp *qp)
+{
+    struct ibv_qp_attr attr;
+    int flags;
+    int rc;
+    memset (&attr, 0, sizeof (attr));
+    attr.qp_state = IBV_QPS_RTS;
+    attr.timeout = 0x12;
+    attr.retry_cnt = 6;
+    attr.rnr_retry = 0;
+    attr.sq_psn = 0;
+    attr.max_rd_atomic = 1;
+    flags = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
+        IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
+    rc = ibv_modify_qp (qp, &attr, flags);
+    if (rc)
+        fprintf (stderr, "failed to modify QP state to RTS\n");
+    return rc;
+}
 
 
 
