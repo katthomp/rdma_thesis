@@ -4,7 +4,8 @@
  *
  */
 /******************************************************************************
- *
+
+*
  * RDMA Aware Networks Programming Example
  *
  * This code demonstrates how to perform the following operations using the * VPI Verbs API:
@@ -796,8 +797,8 @@ modify_qp_to_rts (struct ibv_qp *qp)
     memset (&attr, 0, sizeof (attr));
     attr.qp_state = IBV_QPS_RTS;
     attr.timeout = 0x12;
-    attr.retry_cnt = 6;
-    attr.rnr_retry = 0;
+    attr.retry_cnt = 7;
+    attr.rnr_retry = 7;
     attr.sq_psn = 0;
     attr.max_rd_atomic = 1;
     flags = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
@@ -1141,18 +1142,18 @@ main (int argc, char *argv[])
         goto main_exit;
     }
     /* let the server post the sr */
-    /*  if (!config.server_name)
+    if (!config.server_name)
         if (post_send (&res, IBV_WR_SEND))
         {
         fprintf (stderr, "failed to post sr\n");
         goto main_exit;
-        }*/
+        }
     /* in both sides we expect to get a completion */
-    /*  if (poll_completion (&res))
+    if (poll_completion (&res))
         {
         fprintf (stderr, "poll completion failed\n");
         goto main_exit;
-        }*/
+        }
     /* after polling the completion we have the message in the client buffer too */
     if (config.server_name)
         fprintf (stdout, "Message is: '%s'\n", res.buf);
